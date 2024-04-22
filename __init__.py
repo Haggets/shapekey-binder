@@ -5,7 +5,7 @@ from bpy.types import Panel
 bl_info = {
     "name": "Shapekey Binder",
     "author": "Haggets",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (4, 1, 0),
     "description": "Allows shapekeys of other objects to closely match the active object's shapekeys",
     "category": "System",
@@ -22,11 +22,17 @@ class SP_parameters(bpy.types.PropertyGroup):
 
 @persistent
 def bind_update(self, context):
-    for object in bpy.data.objects:
-        if not object.get("sp_binded_object"):
-            continue
+    binded_objects = bpy.context.scene.get("sp_binded_objects")
+    if not binded_objects:
+        return
+
+    for object in binded_objects:
+        object = bpy.data.objects.get(object)
         if bpy.context.object == object:
             continue
+
+        if not getattr(object.data, "shape_keys"):
+            object.shape_key_add(name="Basis", from_mix=False)
 
         base_object = object.get("sp_binded_object")
         object.show_only_shape_key = base_object.show_only_shape_key
@@ -100,7 +106,7 @@ class OSB_OT_bind(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-
+        binded_objects = bpy.context.scene.get("sp_binded_objects") or []
         selected_meshes = [item for item in bpy.context.selected_objects]
         active_mesh = bpy.context.object
 
@@ -109,6 +115,12 @@ class OSB_OT_bind(bpy.types.Operator):
                 continue
 
             object["sp_binded_object"] = active_mesh
+            if binded_objects.count(object.name):
+                continue
+
+            binded_objects.append(object.name)
+
+        bpy.context.scene["sp_binded_objects"] = binded_objects
 
         bind_update(self, context)
 
@@ -126,11 +138,17 @@ class OSB_OT_unbind(bpy.types.Operator):
     def execute(self, context):
         selected_meshes = [item for item in bpy.context.selected_objects]
 
+        binded_objects = bpy.context.scene.get("sp_binded_objects") or []
         for object in selected_meshes:
             if not object.get("sp_binded_object"):
                 continue
 
             del object["sp_binded_object"]
+
+            try:
+                binded_objects.remove(object.name)
+            except ValueError:
+                pass
 
             binded_shape_keys = object.data.shape_keys
 
@@ -147,6 +165,11 @@ class OSB_OT_unbind(bpy.types.Operator):
 
                 if not len(driver.driver.variables):
                     binded_shape_keys.animation_data.drivers.remove(driver)
+
+        bpy.context.scene["sp_binded_objects"] = binded_objects
+
+        if not len(bpy.context.scene["sp_binded_objects"]):
+            del bpy.context.scene["sp_binded_objects"]
 
         return {"FINISHED"}
 
