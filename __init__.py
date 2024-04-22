@@ -1,6 +1,5 @@
 import bpy
 from bpy.app.handlers import persistent
-from bpy.types import Panel
 
 bl_info = {
     "name": "Shapekey Binder",
