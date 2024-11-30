@@ -25,8 +25,13 @@ def bind_update(self, context):
     if not binded_objects:
         return
 
-    for object in binded_objects:
-        object = bpy.data.objects.get(object)
+    removed_objects = []
+    for object_name in binded_objects:
+        object = bpy.data.objects.get(object_name)
+
+        if not object:
+            removed_objects.append(object_name)
+            continue
         if bpy.context.object == object:
             continue
 
@@ -84,6 +89,9 @@ def bind_update(self, context):
                     'key_blocks["{}"].value'.format(binded_key.name)
                 ):
                     object.shape_key_remove(binded_key)
+
+    for object in removed_objects:
+        binded_objects.remove(object)
 
 
 class OSB_OT_bind(bpy.types.Operator):
