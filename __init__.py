@@ -1,5 +1,6 @@
 import bpy
 from bpy.app.handlers import persistent
+from bpy.types import Object
 
 bl_info = {
     "name": "Shapekey Binder",
@@ -21,77 +22,93 @@ class SP_parameters(bpy.types.PropertyGroup):
 
 @persistent
 def bind_update(self, context):
+    active_object = bpy.context.object
     binded_objects = bpy.context.scene.get("sp_binded_objects")
     if not binded_objects:
         return
 
     removed_objects = []
     for object_name in binded_objects:
-        object = bpy.data.objects.get(object_name)
-
-        if not object:
+        if not (target_object := bpy.data.objects.get(object_name)):
             removed_objects.append(object_name)
             continue
-        if bpy.context.object == object:
+        if active_object == target_object:
+            continue
+        source_object: Object = target_object.get("sp_binded_object")
+        if not source_object:
+            removed_objects.append(object_name)
             continue
 
-        if not getattr(object.data, "shape_keys"):
-            object.shape_key_add(name="Basis", from_mix=False)
+        # Adds a shapekey if one doesn't exist already
+        if not getattr(target_object.data, "shape_keys"):
+            target_object.shape_key_add(name="Basis", from_mix=False)
 
-        base_object = object.get("sp_binded_object")
-        object.show_only_shape_key = base_object.show_only_shape_key
-        object.active_shape_key_index = object.data.shape_keys.key_blocks.find(
-            base_object.active_shape_key.name
+        mirror_shape_key_parameters(source_object, target_object)
+        mirror_shape_keys(source_object, target_object)
+        remove_leftover_shape_keys(source_object, target_object)
+
+    for object_name in removed_objects:
+        binded_objects.remove(object_name)
+
+
+def mirror_shape_key_parameters(source_object: Object, target_object: Object):
+    target_object.show_only_shape_key = source_object.show_only_shape_key
+    target_object.active_shape_key_index = (
+        target_object.data.shape_keys.key_blocks.find(
+            source_object.active_shape_key.name
         )
-        SPPARAMETERS = base_object.data.spparameters
+    )
 
-        base_shape_keys = base_object.data.shape_keys
-        binded_shape_keys = object.data.shape_keys
 
-        # Creates new shapekeys from the base object onto the binded object
-        for base_key in base_object.data.shape_keys.key_blocks:
-            if not (binded_key := object.data.shape_keys.key_blocks.get(base_key.name)):
-                binded_key = object.shape_key_add(name=base_key.name, from_mix=False)
+def mirror_shape_keys(source_object: Object, target_object: Object):
+    source_shape_keys = source_object.data.shape_keys
+    target_shape_keys = target_object.data.shape_keys
+    target_drivers = target_shape_keys.animation_data.drivers
 
-            if not getattr(binded_shape_keys, "animation_data"):
-                binded_shape_keys.animation_data_create()
+    # Creates new shapekeys from the base object onto the binded object
+    for base_key in source_shape_keys.key_blocks:
+        if not (binded_key := target_shape_keys.key_blocks.get(base_key.name)):
+            binded_key = target_object.shape_key_add(name=base_key.name, from_mix=False)
 
-            # Links the shapekey to a driver if no driver is found
-            if binded_shape_keys.animation_data.drivers.find(
-                'key_blocks["{}"].value'.format(binded_key.name)
-            ):
-                continue
+        if not getattr(target_shape_keys, "animation_data"):
+            target_shape_keys.animation_data_create()
 
-            driver = binded_key.driver_add("value").driver
-            driver.expression = "sb_bind"
-            if var := driver.variables.get("sb_bind"):
-                driver.variables.remove(var)
+        # Links the shapekey to a driver if no driver is found
+        if target_drivers.find(f'key_blocks["{binded_key.name}"].value'):
+            continue
 
-            var = driver.variables.new()
-            var.name = "sb_bind"
-            target = var.targets[0]
-            target.id_type = "KEY"
-            target.id = base_shape_keys
-            target.data_path = 'key_blocks["{}"].value'.format(binded_key.name)
+        driver = binded_key.driver_add("value").driver
+        driver.expression = "sb_bind"
+        if var := driver.variables.get("sb_bind"):
+            driver.variables.remove(var)
 
-        # Remove shapekeys that no longer exist in the base object
-        for binded_key in object.data.shape_keys.key_blocks:
-            if not getattr(binded_shape_keys, "animation_data"):
-                binded_shape_keys.animation_data_create()
+        var = driver.variables.new()
+        var.name = "sb_bind"
+        target = var.targets[0]
+        target.id_type = "KEY"
+        target.id = source_shape_keys
+        target.data_path = 'key_blocks["{}"].value'.format(binded_key.name)
 
-            if SPPARAMETERS.full_mirror:
-                if not base_object.data.shape_keys.key_blocks.get(binded_key.name):
-                    object.shape_key_remove(binded_key)
-            else:
-                if not base_object.data.shape_keys.key_blocks.get(
-                    binded_key.name
-                ) and binded_shape_keys.animation_data.drivers.find(
-                    'key_blocks["{}"].value'.format(binded_key.name)
-                ):
-                    object.shape_key_remove(binded_key)
 
-    for object in removed_objects:
-        binded_objects.remove(object)
+def remove_leftover_shape_keys(source_object: Object, target_object: Object):
+    SPPARAMETERS = source_object.data.spparameters
+    source_shape_keys = source_object.data.shape_keys
+    target_shape_keys = target_object.data.shape_keys
+    target_drivers = target_shape_keys.animation_data.drivers
+
+    # Remove shapekeys that no longer exist in the base object
+    for binded_key in target_object.data.shape_keys.key_blocks:
+        if not getattr(target_shape_keys, "animation_data"):
+            target_shape_keys.animation_data_create()
+
+        if SPPARAMETERS.full_mirror:
+            if not source_shape_keys.key_blocks.get(binded_key.name):
+                target_object.shape_key_remove(binded_key)
+        else:
+            if not source_shape_keys.key_blocks.get(
+                binded_key.name
+            ) and target_drivers.find(f'key_blocks["{binded_key.name}"].value'):
+                target_object.shape_key_remove(binded_key)
 
 
 class OSB_OT_bind(bpy.types.Operator):
@@ -121,7 +138,9 @@ class OSB_OT_bind(bpy.types.Operator):
             if object == active_mesh:
                 continue
 
+            print(object)
             object["sp_binded_object"] = active_mesh
+            print(active_mesh)
             if binded_objects.count(object.name):
                 continue
 
