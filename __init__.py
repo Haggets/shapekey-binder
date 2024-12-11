@@ -138,9 +138,7 @@ class OSB_OT_bind(bpy.types.Operator):
             if object == active_mesh:
                 continue
 
-            print(object)
             object["sp_binded_object"] = active_mesh
-            print(active_mesh)
             if binded_objects.count(object.name):
                 continue
 
