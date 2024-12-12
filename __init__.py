@@ -82,17 +82,17 @@ def mirror_shape_keys(source_object: Object, target_object: Object):
 
     # Creates new shapekeys from the base object onto the binded object
     for base_key in source_shape_keys.key_blocks:
-        if not (binded_key := target_shape_keys.key_blocks.get(base_key.name)):
-            binded_key = target_object.shape_key_add(name=base_key.name, from_mix=False)
+        if not (target_key := target_shape_keys.key_blocks.get(base_key.name)):
+            target_key = target_object.shape_key_add(name=base_key.name, from_mix=False)
 
         if not getattr(target_shape_keys, "animation_data"):
             target_shape_keys.animation_data_create()
 
         # Links the shapekey to a driver if no driver is found
-        if target_drivers.find(f'key_blocks["{binded_key.name}"].value'):
+        if target_drivers.find(f'key_blocks["{target_key.name}"].value'):
             continue
 
-        driver = binded_key.driver_add("value").driver
+        driver = target_key.driver_add("value").driver
         driver.expression = "sb_bind"
         if var := driver.variables.get("sb_bind"):
             driver.variables.remove(var)
@@ -102,7 +102,7 @@ def mirror_shape_keys(source_object: Object, target_object: Object):
         target = var.targets[0]
         target.id_type = "KEY"
         target.id = source_shape_keys
-        target.data_path = 'key_blocks["{}"].value'.format(binded_key.name)
+        target.data_path = 'key_blocks["{}"].value'.format(target_key.name)
 
 
 def remove_leftover_shape_keys(source_object: Object, target_object: Object):
@@ -112,16 +112,17 @@ def remove_leftover_shape_keys(source_object: Object, target_object: Object):
     target_drivers = target_shape_keys.animation_data.drivers
 
     # Remove shapekeys that no longer exist in the base object
-    for binded_key in target_object.data.shape_keys.key_blocks:
+    for target_key in target_object.data.shape_keys.key_blocks:
         if not getattr(target_shape_keys, "animation_data"):
             target_shape_keys.animation_data_create()
 
-        if not source_shape_keys.key_blocks.get(binded_key.name):
+        if not source_shape_keys.key_blocks.get(target_key.name):
             if SPPARAMETERS.full_mirror:
-                target_object.shape_key_remove(binded_key)
+                print("test!")
+                target_object.shape_key_remove(target_key)
 
             elif driver := target_drivers.find(
-                f'key_blocks["{binded_key.name}"].value'
+                f'key_blocks["{target_key.name}"].value'
             ):
                 remove_driver(target_shape_keys, driver)
 
@@ -227,10 +228,10 @@ class OSB_OT_unbind(bpy.types.Operator):
             # Clears shapekey drivers
             target_shape_keys = object.data.shape_keys
             target_drivers = target_shape_keys.animation_data.drivers
-            for binded_key in target_shape_keys.key_blocks:
+            for target_key in target_shape_keys.key_blocks:
                 if not (
                     driver := target_drivers.find(
-                        f'key_blocks["{binded_key.name}"].value'
+                        f'key_blocks["{target_key.name}"].value'
                     )
                 ):
                     continue
@@ -258,7 +259,9 @@ class OSB_PT_mainpanel(bpy.types.Panel):
         col = layout.column(align=True)
         col.operator("osb.bind")
         col.operator("osb.unbind")
-        col.prop(object.data.spparameters, "full_mirror")
+
+        if bpy.context.object and bpy.context.object.type == "MESH":
+            col.prop(object.data.spparameters, "full_mirror")
 
 
 # endregion
