@@ -2,7 +2,7 @@ schema_version = "1.0.0"
 
 # Example of manifest file for a Blender extension
 # Change the values according to your extension
-id = "my_example_extension"
+id = "shapekey_binder"
 version = "1.0.0"
 name = "Shapekey Binder"
 tagline = "Binds the shapekeys of multiple objects so they act as one"
