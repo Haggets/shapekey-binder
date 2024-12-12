@@ -2,15 +2,6 @@ import bpy
 from bpy.app.handlers import persistent
 from bpy.types import FCurve, Key, Object, ShapeKey
 
-bl_info = {
-    "name": "Shapekey Binder",
-    "author": "Haggets",
-    "version": (1, 0, 1),
-    "blender": (4, 1, 0),
-    "description": "Allows shapekeys of other objects to closely match the active object's shapekeys",
-    "category": "System",
-}
-
 
 # region Parameters
 class SP_parameters(bpy.types.PropertyGroup):
