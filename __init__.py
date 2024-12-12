@@ -118,7 +118,6 @@ def remove_leftover_shape_keys(source_object: Object, target_object: Object):
 
         if not source_shape_keys.key_blocks.get(target_key.name):
             if SPPARAMETERS.full_mirror:
-                print("test!")
                 target_object.shape_key_remove(target_key)
 
             elif driver := target_drivers.find(
