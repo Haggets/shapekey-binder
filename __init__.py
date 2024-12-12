@@ -12,6 +12,7 @@ bl_info = {
 }
 
 
+# region Parameters
 class SP_parameters(bpy.types.PropertyGroup):
     full_mirror: bpy.props.BoolProperty(
         name="Full Shapekey Mirroring",
@@ -20,6 +21,10 @@ class SP_parameters(bpy.types.PropertyGroup):
     )
 
 
+# endregion
+
+
+# region Main Function
 @persistent
 def bind_update(self, context):
     active_object = bpy.context.object
@@ -43,20 +48,30 @@ def bind_update(self, context):
         if not getattr(target_object.data, "shape_keys"):
             target_object.shape_key_add(name="Basis", from_mix=False)
 
-        mirror_shape_key_parameters(source_object, target_object)
         mirror_shape_keys(source_object, target_object)
         remove_leftover_shape_keys(source_object, target_object)
+        mirror_shape_key_positions(source_object, target_object)
+        mirror_shape_key_parameters(source_object, target_object)
 
     for object_name in removed_objects:
         binded_objects.remove(object_name)
 
 
+# endregion
+
+
+# region Utilities
+def get_active_shape_key_index(source_object: Object, target_object: Object):
+    index = target_object.data.shape_keys.key_blocks.find(
+        source_object.active_shape_key.name
+    )
+    return index
+
+
 def mirror_shape_key_parameters(source_object: Object, target_object: Object):
     target_object.show_only_shape_key = source_object.show_only_shape_key
-    target_object.active_shape_key_index = (
-        target_object.data.shape_keys.key_blocks.find(
-            source_object.active_shape_key.name
-        )
+    target_object.active_shape_key_index = get_active_shape_key_index(
+        source_object, target_object
     )
 
 
@@ -111,6 +126,46 @@ def remove_leftover_shape_keys(source_object: Object, target_object: Object):
                 target_object.shape_key_remove(binded_key)
 
 
+def mirror_shape_key_positions(source_object: Object, target_object: Object):
+    source_shape_keys = source_object.data.shape_keys.key_blocks
+    target_shape_keys = target_object.data.shape_keys.key_blocks
+    for target_key in target_shape_keys[1:]:
+        if not (source_key := source_shape_keys.get(target_key.name)):
+            continue
+
+        target_index = target_shape_keys.find(target_key.name)
+        source_index = source_shape_keys.find(source_key.name)
+        if source_index != target_index:
+            move_shape_key(target_object, target_key.name, source_index)
+
+
+# Thanks to Cirno, extremely intelligent approach (that i don't understand)
+# https://blenderartists.org/t/reorder-bpy-prop-collection-data-shape-keys-key-blocks/1215584
+def move_shape_key(object: Object, key_name: str, index: int):
+    object_data = object.data
+
+    key1 = object_data.shape_keys.key_blocks[key_name]
+    key2 = object_data.shape_keys.key_blocks[index]
+
+    key1_data = [v.co.copy() for v in key1.data]
+    key2_data = [v.co.copy() for v in key2.data]
+
+    for i, v in enumerate(key1.data):
+        v.co = key2_data[i]
+    for i, v in enumerate(key2.data):
+        v.co = key1_data[i]
+
+    init_key1_name = key1.name
+    init_key2_name = key2.name
+    key2.name = "_temp_name"
+    key1.name = init_key2_name
+    key2.name = init_key1_name
+
+
+# endregion
+
+
+# region Operators
 class OSB_OT_bind(bpy.types.Operator):
     """Binds the selected meshes to the active one"""
 
@@ -219,6 +274,10 @@ class OSB_PT_mainpanel(bpy.types.Panel):
             col.prop(object.data.spparameters, "full_mirror")
 
 
+# endregion
+
+
+# region Registration
 def register():
     bpy.utils.register_class(SP_parameters)
     bpy.utils.register_class(OSB_OT_bind)
@@ -244,3 +303,4 @@ def unregister():
 
 if __name__ == "__main__":
     register()
+# endregion
