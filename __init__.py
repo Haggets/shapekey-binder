@@ -1,6 +1,6 @@
 import bpy
 from bpy.app.handlers import persistent
-from bpy.types import Object
+from bpy.types import FCurve, Key, Object, ShapeKey
 
 bl_info = {
     "name": "Shapekey Binder",
@@ -27,23 +27,20 @@ class SP_parameters(bpy.types.PropertyGroup):
 # region Main Function
 @persistent
 def bind_update(self, context):
-    active_object = bpy.context.object
-    binded_objects = bpy.context.scene.get("sp_binded_objects")
-    if not binded_objects:
+    if not (binded_objects := get_binded_objects()):
         return
 
-    removed_objects = []
-    for object_name in binded_objects:
-        if not (target_object := bpy.data.objects.get(object_name)):
-            removed_objects.append(object_name)
-            continue
+    active_object = bpy.context.object
+
+    for target_object in binded_objects:
         if active_object == target_object:
             continue
-        source_object: Object = target_object.get("sp_binded_object")
+        source_object: Object = target_object.data.get("sp_binded_object")
         if not source_object:
-            removed_objects.append(object_name)
             continue
 
+        if not getattr(source_object.data, "shape_keys"):
+            continue
         # Adds a shapekey if one doesn't exist already
         if not getattr(target_object.data, "shape_keys"):
             target_object.shape_key_add(name="Basis", from_mix=False)
@@ -53,14 +50,26 @@ def bind_update(self, context):
         mirror_shape_key_positions(source_object, target_object)
         mirror_shape_key_parameters(source_object, target_object)
 
-    for object_name in removed_objects:
-        binded_objects.remove(object_name)
-
 
 # endregion
 
 
 # region Utilities
+def get_binded_objects() -> list[Object]:
+    binded_objects = []
+    for object in bpy.data.objects:
+        if not object.data:
+            continue
+        if not object.data.get("sp_binded_object"):
+            continue
+        if binded_objects.count(object):
+            continue
+
+        binded_objects.append(object)
+
+    return binded_objects
+
+
 def get_active_shape_key_index(source_object: Object, target_object: Object):
     index = target_object.data.shape_keys.key_blocks.find(
         source_object.active_shape_key.name
@@ -116,14 +125,14 @@ def remove_leftover_shape_keys(source_object: Object, target_object: Object):
         if not getattr(target_shape_keys, "animation_data"):
             target_shape_keys.animation_data_create()
 
-        if SPPARAMETERS.full_mirror:
-            if not source_shape_keys.key_blocks.get(binded_key.name):
+        if not source_shape_keys.key_blocks.get(binded_key.name):
+            if SPPARAMETERS.full_mirror:
                 target_object.shape_key_remove(binded_key)
-        else:
-            if not source_shape_keys.key_blocks.get(
-                binded_key.name
-            ) and target_drivers.find(f'key_blocks["{binded_key.name}"].value'):
-                target_object.shape_key_remove(binded_key)
+
+            elif driver := target_drivers.find(
+                f'key_blocks["{binded_key.name}"].value'
+            ):
+                remove_driver(target_shape_keys, driver)
 
 
 def mirror_shape_key_positions(source_object: Object, target_object: Object):
@@ -136,30 +145,36 @@ def mirror_shape_key_positions(source_object: Object, target_object: Object):
         target_index = target_shape_keys.find(target_key.name)
         source_index = source_shape_keys.find(source_key.name)
         if source_index != target_index:
-            move_shape_key(target_object, target_key.name, source_index)
+            move_shape_key(target_object, target_key, source_index)
 
 
 # Thanks to Cirno, extremely intelligent approach (that i don't understand)
 # https://blenderartists.org/t/reorder-bpy-prop-collection-data-shape-keys-key-blocks/1215584
-def move_shape_key(object: Object, key_name: str, index: int):
-    object_data = object.data
+def move_shape_key(object: Object, shape_key: ShapeKey, target_index: int):
+    index_shape_key = object.data.shape_keys.key_blocks[target_index]
 
-    key1 = object_data.shape_keys.key_blocks[key_name]
-    key2 = object_data.shape_keys.key_blocks[index]
+    shape_key_data = [vertex.co.copy() for vertex in shape_key.data]
+    index_data = [vertex.co.copy() for vertex in index_shape_key.data]
 
-    key1_data = [v.co.copy() for v in key1.data]
-    key2_data = [v.co.copy() for v in key2.data]
+    for index, vertex in enumerate(shape_key.data):
+        vertex.co = index_data[index]
+    for index, vertex in enumerate(index_shape_key.data):
+        vertex.co = shape_key_data[index]
 
-    for i, v in enumerate(key1.data):
-        v.co = key2_data[i]
-    for i, v in enumerate(key2.data):
-        v.co = key1_data[i]
+    shape_key_name = shape_key.name
+    index_shape_key_name = index_shape_key.name
+    index_shape_key.name = "_temp_name"
 
-    init_key1_name = key1.name
-    init_key2_name = key2.name
-    key2.name = "_temp_name"
-    key1.name = init_key2_name
-    key2.name = init_key1_name
+    shape_key.name = index_shape_key_name
+    index_shape_key.name = shape_key_name
+
+
+def remove_driver(target_shape_keys: Key, driver: FCurve):
+    if var := driver.driver.variables.get("sb_bind"):
+        driver.driver.variables.remove(var)
+
+    if not len(driver.driver.variables):
+        target_shape_keys.animation_data.drivers.remove(driver)
 
 
 # endregion
@@ -171,10 +186,8 @@ class OSB_OT_bind(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        has_poll = True
-
         if len(bpy.context.selected_objects) <= 1:
-            cls.poll_message_set("Select more than one object.") if has_poll else None
+            cls.poll_message_set("Select more than one object.")
             return
 
         return True
@@ -185,21 +198,16 @@ class OSB_OT_bind(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        binded_objects = bpy.context.scene.get("sp_binded_objects") or []
-        selected_meshes = [item for item in bpy.context.selected_objects]
         active_mesh = bpy.context.object
+        selected_meshes = bpy.context.selected_objects
 
         for object in selected_meshes:
+            if not object.data:
+                continue
             if object == active_mesh:
                 continue
 
-            object["sp_binded_object"] = active_mesh
-            if binded_objects.count(object.name):
-                continue
-
-            binded_objects.append(object.name)
-
-        bpy.context.scene["sp_binded_objects"] = binded_objects
+            object.data["sp_binded_object"] = active_mesh
 
         bind_update(self, context)
 
@@ -215,47 +223,37 @@ class OSB_OT_unbind(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        selected_meshes = [item for item in bpy.context.selected_objects]
+        selected_meshes = bpy.context.selected_objects
 
-        binded_objects = bpy.context.scene.get("sp_binded_objects") or []
         for object in selected_meshes:
-            if not object.get("sp_binded_object"):
+            if not object.data:
+                continue
+            if not object.data.get("sp_binded_object"):
                 continue
 
-            del object["sp_binded_object"]
+            del object.data["sp_binded_object"]
 
-            try:
-                binded_objects.remove(object.name)
-            except ValueError:
-                pass
-
-            binded_shape_keys = object.data.shape_keys
-
-            for binded_key in binded_shape_keys.key_blocks:
+            # Clears shapekey drivers
+            target_shape_keys = object.data.shape_keys
+            target_drivers = target_shape_keys.animation_data.drivers
+            for binded_key in target_shape_keys.key_blocks:
                 if not (
-                    driver := binded_shape_keys.animation_data.drivers.find(
-                        'key_blocks["{}"].value'.format(binded_key.name)
+                    driver := target_drivers.find(
+                        f'key_blocks["{binded_key.name}"].value'
                     )
                 ):
                     continue
 
-                if var := driver.driver.variables.get("sb_bind"):
-                    driver.driver.variables.remove(var)
-
-                if not len(driver.driver.variables):
-                    binded_shape_keys.animation_data.drivers.remove(driver)
-
-        bpy.context.scene["sp_binded_objects"] = binded_objects
-
-        if not len(bpy.context.scene["sp_binded_objects"]):
-            del bpy.context.scene["sp_binded_objects"]
+                remove_driver(target_shape_keys, driver)
 
         return {"FINISHED"}
 
 
-class OSB_PT_mainpanel(bpy.types.Panel):
-    """"""
+# endregion
 
+
+# region UI
+class OSB_PT_mainpanel(bpy.types.Panel):
     bl_label = "Shapekey Binder"
     bl_description = ""
     bl_space_type = "PROPERTIES"
@@ -266,12 +264,10 @@ class OSB_PT_mainpanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         object = bpy.context.object
-        col = layout.column()
+        col = layout.column(align=True)
         col.operator("osb.bind")
         col.operator("osb.unbind")
-
-        if object and object.type == "MESH":
-            col.prop(object.data.spparameters, "full_mirror")
+        col.prop(object.data.spparameters, "full_mirror")
 
 
 # endregion
