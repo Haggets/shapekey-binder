@@ -92,17 +92,7 @@ def mirror_shape_keys(source_object: Object, target_object: Object):
         if target_drivers.find(f'key_blocks["{target_key.name}"].value'):
             continue
 
-        driver = target_key.driver_add("value").driver
-        driver.expression = "sb_bind"
-        if var := driver.variables.get("sb_bind"):
-            driver.variables.remove(var)
-
-        var = driver.variables.new()
-        var.name = "sb_bind"
-        target = var.targets[0]
-        target.id_type = "KEY"
-        target.id = source_shape_keys
-        target.data_path = 'key_blocks["{}"].value'.format(target_key.name)
+        create_driver(source_shape_keys, target_key)
 
 
 def remove_leftover_shape_keys(source_object: Object, target_object: Object):
@@ -120,10 +110,8 @@ def remove_leftover_shape_keys(source_object: Object, target_object: Object):
             if SPPARAMETERS.full_mirror:
                 target_object.shape_key_remove(target_key)
 
-            elif driver := target_drivers.find(
-                f'key_blocks["{target_key.name}"].value'
-            ):
-                remove_driver(target_shape_keys, driver)
+            elif target_drivers.find(f'key_blocks["{target_key.name}"].value'):
+                target_object.shape_key_remove(target_key)
 
 
 def mirror_shape_key_positions(source_object: Object, target_object: Object):
@@ -137,6 +125,12 @@ def mirror_shape_key_positions(source_object: Object, target_object: Object):
         source_index = source_shape_keys.find(source_key.name)
         if source_index != target_index:
             move_shape_key(target_object, target_key, source_index)
+            create_driver(
+                source_object.data.shape_keys, target_shape_keys[source_index]
+            )
+            create_driver(
+                source_object.data.shape_keys, target_shape_keys[target_index]
+            )
 
 
 # Thanks to Cirno, extremely intelligent approach (that i don't understand)
@@ -160,12 +154,35 @@ def move_shape_key(object: Object, shape_key: ShapeKey, target_index: int):
     index_shape_key.name = shape_key_name
 
 
-def remove_driver(target_shape_keys: Key, driver: FCurve):
+def create_driver(source_shape_keys: Key, shape_key: ShapeKey):
+    driver = shape_key.driver_add("value").driver
+    driver.expression = "sb_bind"
+    if var := driver.variables.get("sb_bind"):
+        driver.variables.remove(var)
+
+    var = driver.variables.new()
+    var.name = "sb_bind"
+    target = var.targets[0]
+    target.id_type = "KEY"
+    target.id = source_shape_keys
+    target.data_path = f'key_blocks["{shape_key.name}"].value'
+
+
+def update_driver(shape_keys: Key, driver: FCurve, name: str):
+    if not (var := driver.driver.variables.get("sb_bind")):
+        return
+
+    target = var.targets[0]
+    target.id = shape_keys
+    target.data_path = f'key_blocks["{name}"].value'
+
+
+def remove_driver(shape_keys: Key, driver: FCurve):
     if var := driver.driver.variables.get("sb_bind"):
         driver.driver.variables.remove(var)
 
     if not len(driver.driver.variables):
-        target_shape_keys.animation_data.drivers.remove(driver)
+        shape_keys.animation_data.drivers.remove(driver)
 
 
 # endregion
@@ -201,6 +218,7 @@ class OSB_OT_bind(bpy.types.Operator):
             object.data["sp_binded_object"] = active_mesh
 
         bind_update(self, context)
+        self.report({"INFO"}, "Objects binded!")
 
         return {"FINISHED"}
 
