@@ -32,7 +32,7 @@ def bind_update(self, context):
 
         if not getattr(source_object.data, "shape_keys"):
             continue
-        # Adds a shapekey if one doesn't exist already
+        # Adds shapekey data if it doesn't exist already
         if not getattr(target_object.data, "shape_keys"):
             target_object.shape_key_add(name="Basis", from_mix=False)
 
