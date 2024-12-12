@@ -20,7 +20,6 @@ class SP_parameters(bpy.types.PropertyGroup):
 def bind_update(self, context):
     if not (binded_objects := get_binded_objects()):
         return
-
     active_object = bpy.context.object
 
     for target_object in binded_objects:
@@ -69,6 +68,10 @@ def get_active_shape_key_index(source_object: Object, target_object: Object):
 
 
 def mirror_shape_key_parameters(source_object: Object, target_object: Object):
+    if bpy.context.object.data == target_object.data:
+        return
+
+    # print(target_object, bpy.context.object)
     target_object.show_only_shape_key = source_object.show_only_shape_key
     target_object.active_shape_key_index = get_active_shape_key_index(
         source_object, target_object
@@ -92,6 +95,7 @@ def mirror_shape_keys(source_object: Object, target_object: Object):
         if target_drivers.find(f'key_blocks["{target_key.name}"].value'):
             continue
 
+        # print(base_key, target_key)
         create_driver(source_shape_keys, target_key)
 
 
@@ -102,7 +106,7 @@ def remove_leftover_shape_keys(source_object: Object, target_object: Object):
     target_drivers = target_shape_keys.animation_data.drivers
 
     # Remove shapekeys that no longer exist in the base object
-    for target_key in target_object.data.shape_keys.key_blocks:
+    for target_key in target_shape_keys.key_blocks:
         if not getattr(target_shape_keys, "animation_data"):
             target_shape_keys.animation_data_create()
 
@@ -115,28 +119,26 @@ def remove_leftover_shape_keys(source_object: Object, target_object: Object):
 
 
 def mirror_shape_key_positions(source_object: Object, target_object: Object):
-    source_shape_keys = source_object.data.shape_keys.key_blocks
-    target_shape_keys = target_object.data.shape_keys.key_blocks
-    for target_key in target_shape_keys[1:]:
-        if not (source_key := source_shape_keys.get(target_key.name)):
+    if bpy.context.object.data == target_object.data:
+        return
+
+    source_shape_keys = source_object.data.shape_keys
+    target_shape_keys = target_object.data.shape_keys
+    for target_key in target_shape_keys.key_blocks:
+        if not (source_key := source_shape_keys.key_blocks.get(target_key.name)):
             continue
 
-        target_index = target_shape_keys.find(target_key.name)
-        source_index = source_shape_keys.find(source_key.name)
+        target_index = target_shape_keys.key_blocks.find(target_key.name)
+        source_index = source_shape_keys.key_blocks.find(source_key.name)
         if source_index != target_index:
             move_shape_key(target_object, target_key, source_index)
-            create_driver(
-                source_object.data.shape_keys, target_shape_keys[source_index]
-            )
-            create_driver(
-                source_object.data.shape_keys, target_shape_keys[target_index]
-            )
 
 
 # Thanks to Cirno, extremely intelligent approach (that i don't understand)
 # https://blenderartists.org/t/reorder-bpy-prop-collection-data-shape-keys-key-blocks/1215584
 def move_shape_key(object: Object, shape_key: ShapeKey, target_index: int):
-    index_shape_key = object.data.shape_keys.key_blocks[target_index]
+    shape_keys = object.data.shape_keys
+    index_shape_key = shape_keys.key_blocks[target_index]
 
     shape_key_data = [vertex.co.copy() for vertex in shape_key.data]
     index_data = [vertex.co.copy() for vertex in index_shape_key.data]
@@ -145,6 +147,12 @@ def move_shape_key(object: Object, shape_key: ShapeKey, target_index: int):
         vertex.co = index_data[index]
     for index, vertex in enumerate(index_shape_key.data):
         vertex.co = shape_key_data[index]
+
+    # print(shape_key.name, index_shape_key.name)
+    if shape_keys.animation_data.drivers.find(f'key_blocks["{shape_keys.name}"].value'):
+        create_driver(shape_keys, index_shape_key)
+    else:
+        remove_driver(shape_keys, index_shape_key)
 
     shape_key_name = shape_key.name
     index_shape_key_name = index_shape_key.name
@@ -177,7 +185,14 @@ def update_driver(shape_keys: Key, driver: FCurve, name: str):
     target.data_path = f'key_blocks["{name}"].value'
 
 
-def remove_driver(shape_keys: Key, driver: FCurve):
+def remove_driver(shape_keys: Key, shape_key: ShapeKey):
+    if not (
+        driver := shape_keys.animation_data.drivers.find(
+            f'key_blocks["{shape_key.name}"].value'
+        )
+    ):
+        return
+
     if var := driver.driver.variables.get("sb_bind"):
         driver.driver.variables.remove(var)
 
@@ -244,16 +259,8 @@ class OSB_OT_unbind(bpy.types.Operator):
 
             # Clears shapekey drivers
             target_shape_keys = object.data.shape_keys
-            target_drivers = target_shape_keys.animation_data.drivers
             for target_key in target_shape_keys.key_blocks:
-                if not (
-                    driver := target_drivers.find(
-                        f'key_blocks["{target_key.name}"].value'
-                    )
-                ):
-                    continue
-
-                remove_driver(target_shape_keys, driver)
+                remove_driver(target_shape_keys, target_key)
 
         return {"FINISHED"}
 
@@ -277,8 +284,18 @@ class OSB_PT_mainpanel(bpy.types.Panel):
         col.operator("osb.bind")
         col.operator("osb.unbind")
 
-        if bpy.context.object and bpy.context.object.type == "MESH":
-            col.prop(object.data.spparameters, "full_mirror")
+        if not bpy.context.object:
+            return
+        if not bpy.context.object.type == "MESH":
+            return
+
+        col.prop(object.data.spparameters, "full_mirror")
+
+        if bpy.context.object.data.get("sp_binded_object"):
+            box = layout.box()
+            box.label(
+                text=f"Binded to: {bpy.context.object.data.get("sp_binded_object").name}"
+            )
 
 
 # endregion
