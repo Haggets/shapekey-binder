@@ -294,7 +294,7 @@ class OSB_PT_mainpanel(bpy.types.Panel):
         if bpy.context.object.data.get("sp_binded_object"):
             box = layout.box()
             box.label(
-                text=f"Binded to: {bpy.context.object.data.get("sp_binded_object").name}"
+                text=f"Binded to: {bpy.context.object.data.get('sp_binded_object').name}"
             )
 
 
