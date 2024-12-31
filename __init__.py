@@ -81,6 +81,10 @@ def mirror_shape_key_parameters(source_object: Object, target_object: Object):
 def mirror_shape_keys(source_object: Object, target_object: Object):
     source_shape_keys = source_object.data.shape_keys
     target_shape_keys = target_object.data.shape_keys
+
+    if not target_shape_keys.animation_data:
+        target_shape_keys.animation_data_create()
+
     target_drivers = target_shape_keys.animation_data.drivers
 
     # Creates new shapekeys from the base object onto the binded object
